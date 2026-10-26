@@ -5,3 +5,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# 本地生成的 Chroma 向量库
+data/

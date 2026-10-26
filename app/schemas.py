@@ -15,5 +15,18 @@ class ChatRequest(BaseModel):
         return value
 
 
+class Source(BaseModel):
+    """回答引用的知识库文档来源。"""
+
+    doc_id: str
+    title: str
+    source: str
+    department: str
+    access_scope: str
+    snippet: str
+    score: float
+
+
 class ChatResponse(BaseModel):
     answer: str
+    sources: list[Source] = Field(default_factory=list)
