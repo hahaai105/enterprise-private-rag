@@ -3,6 +3,7 @@ doc_id: XC-RD-002
 title: 项目架构说明
 department: 研发中心
 access_scope: 研发中心
+access_group: rd
 classification: 内部
 owner: 研发中心
 updated_at: "2026-10-10"
@@ -22,7 +23,9 @@ version: v1.2
 - 使用 Chroma 本地持久化向量库，目录为 data/chroma。
 - LangGraph 工作流为 START → retrieve → answer → END。
 - DeepSeek 仅依据检索片段回答，并返回文档来源。
-- 暂不包含用户登录、RBAC 权限、飞书接入、Rerank 和混合检索。
+- 检索时按用户部门过滤：public 文档全员可见，部门文档仅本部门可见。
+- 已通过飞书机器人接入单聊问答（WebSocket 长连接）。
+- 暂不包含用户登录、完整 RBAC、Rerank 和混合检索。
 
 ## 3. 组件
 
@@ -47,12 +50,14 @@ version: v1.2
 
 ### 4.2 在线问答
 
-1. 用户向 POST /chat 提交 question。
-2. retrieve 节点对问题生成查询向量，在 Chroma 中检索最相关的 4 个切片。
-3. 相似度低于 0.4 的切片被丢弃。
-4. 若没有可用切片，answer 节点直接返回“知识库中未找到相关依据”，不调用大模型。
-5. 若有可用切片，将切片拼接为参考资料，连同问题发送给 DeepSeek。
-6. answer 节点返回答案，接口同时返回去重后的文档来源。
+1. 用户向 POST /chat 提交 question，或由飞书机器人接收单聊消息。
+2. 根据用户 ID 解析部门（本地测试映射；未知用户为 public）。
+3. retrieve 节点只允许 access_group 为 public 或本部门的切片参与检索。
+4. 对问题生成查询向量，在 Chroma 中检索最相关的 4 个切片。
+5. 相似度低于 0.4 的切片被丢弃。
+6. 若没有可用切片，answer 节点直接返回“知识库中未找到相关依据”，不调用大模型。
+7. 若有可用切片，将切片拼接为参考资料，连同问题发送给 DeepSeek。
+8. answer 节点返回答案，接口同时返回去重后的文档来源。
 
 ## 5. 接口约定
 
@@ -91,8 +96,9 @@ version: v1.2
 
 - 知识库源文件：knowledge_base/*.md，纳入 Git 管理。
 - 向量库：data/chroma，属于本地生成数据，不纳入 Git。
-- 文档元数据字段：doc_id、title、department、access_scope、classification、owner、updated_at、version。
-- access_scope 为后续权限控制预留，当前阶段不做过滤。
+- 文档元数据字段：doc_id、title、department、access_scope、access_group、classification、owner、updated_at、version。
+- access_group 是检索过滤依据：public、finance、hr、rd。
+- access_scope 是人类可读的访问说明。
 
 ## 7. 部署
 
@@ -104,6 +110,6 @@ version: v1.2
 ## 8. 已知限制与后续规划
 
 - 当前仅支持 Markdown，不支持 PDF、Word 和网页。
-- 未实现权限过滤，access_scope 仅作元数据保留。
+- 部门权限为 MVP：本地测试身份映射可被伪造，未实现生产级登录与鉴权。
 - 未实现查询改写、Rerank 和混合检索。
-- 后续阶段：接入飞书机器人、增加 RBAC 权限、补充检索评测集。
+- 后续阶段：完善用户认证与生产级权限体系、增加 Rerank、补充检索评测集。

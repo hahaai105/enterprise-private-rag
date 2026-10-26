@@ -1,6 +1,6 @@
 [project]
 name = "enterprise-private-rag"
-version = "0.2.0"
+version = "0.4.0"
 description = "基于 FastAPI + LangGraph + DeepSeek + Chroma 的企业私有知识库智能问答系统（MVP）"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,6 +14,7 @@ dependencies = [
     "sentence-transformers>=6.2.0",
     "langchain-text-splitters>=1.1.3",
     "pyyaml>=6.0.3",
+    "lark-oapi>=1.4,<2.0",
 ]
 
 [dependency-groups]

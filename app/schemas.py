@@ -5,6 +5,11 @@ from pydantic import BaseModel, Field, field_validator
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000, description="用户问题")
+    user_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="飞书用户 open_id；仅用于本地测试身份映射，未提供时只能访问 public 文档",
+    )
 
     @field_validator("question")
     @classmethod

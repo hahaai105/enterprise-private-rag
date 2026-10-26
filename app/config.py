@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     request_timeout: float = 60.0
 
+    # 飞书机器人配置（不启动机器人时可为空）
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+
+    # 本地测试用身份映射：JSON，例如 {"ou_xxx": "finance"}
+    test_user_departments: dict[str, str] = Field(default_factory=dict)
+
     # RAG 配置
     knowledge_base_dir: str = "knowledge_base"
     chroma_dir: str = "data/chroma"

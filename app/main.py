@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from .config import Settings, get_settings
 from .graph import build_graph, run_chat
 from .llm import MissingApiKeyError, build_chat_model
+from .permissions import department_for_user
 from .rag import KnowledgeBase, KnowledgeBaseNotReadyError
 from .schemas import ChatRequest, ChatResponse
 
@@ -20,7 +21,7 @@ def create_app(
 ) -> FastAPI:
     """创建应用。graph / retriever 可注入，用于测试时绕过真实模型与向量库。"""
     settings = settings or get_settings()
-    app = FastAPI(title="Enterprise Private RAG", version="0.2.0")
+    app = FastAPI(title="Enterprise Private RAG", version="0.4.0")
     compiled_graph = graph
 
     def get_graph():
@@ -45,8 +46,12 @@ def create_app(
                 detail="服务未配置 DEEPSEEK_API_KEY，请检查环境变量",
             ) from None
 
+        department = department_for_user(
+            payload.user_id,
+            settings.test_user_departments,
+        )
         try:
-            answer, sources = await run_chat(chat_graph, payload.question)
+            answer, sources = await run_chat(chat_graph, payload.question, department)
         except KnowledgeBaseNotReadyError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except Exception as exc:  # 不记录异常详情中的请求信息，避免泄露敏感内容

@@ -29,8 +29,9 @@ def test_chat_returns_answer_with_sources(fake_model):
             "score": 0.82,
         }
     ]
-    # 问题已去除首尾空白，并确实进入检索节点
+    # 问题已去除首尾空白，并确实进入检索节点；未提供用户时只能访问 public
     assert retriever.questions == ["年假有几天？"]
+    assert retriever.departments == ["public"]
 
     messages = fake_model.calls[0]
     assert messages[0].type == "system"
@@ -77,7 +78,7 @@ def test_chat_returns_503_without_api_key():
 
 def test_chat_returns_503_when_knowledge_base_not_ready(fake_model):
     class NotReadyRetriever:
-        def search(self, question):
+        def search(self, question, department="public"):
             raise KnowledgeBaseNotReadyError(
                 "知识库尚未初始化或为空，请先运行：uv run python -m app.ingest"
             )
@@ -99,3 +100,34 @@ def test_chat_returns_502_when_model_fails():
 
     assert response.status_code == 502
     assert response.json()["detail"] == "模型调用失败，请稍后重试"
+
+
+def test_chat_resolves_department_from_user_mapping(fake_model):
+    retriever = FakeRetriever([make_chunk()])
+    client = make_client(
+        graph=build_graph(fake_model, retriever),
+        settings=make_settings(
+            test_user_departments={"ou_finance_demo": "finance"},
+        ),
+    )
+
+    response = client.post(
+        "/chat",
+        json={"question": "2026 年总预算是多少？", "user_id": "ou_finance_demo"},
+    )
+
+    assert response.status_code == 200
+    assert retriever.departments == ["finance"]
+
+
+def test_chat_uses_public_for_unknown_user(fake_model):
+    retriever = FakeRetriever([make_chunk()])
+    client = make_client(graph=build_graph(fake_model, retriever))
+
+    response = client.post(
+        "/chat",
+        json={"question": "2026 年总预算是多少？", "user_id": "ou_stranger"},
+    )
+
+    assert response.status_code == 200
+    assert retriever.departments == ["public"]

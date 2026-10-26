@@ -2,7 +2,8 @@
 doc_id: XC-FIN-001
 title: 2026年度财务预算报告
 department: 财务部
-access_scope: 管理层
+access_scope: 财务部、管理层
+access_group: finance
 classification: 秘密
 owner: 财务部
 updated_at: "2026-01-20"

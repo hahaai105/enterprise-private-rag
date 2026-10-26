@@ -3,6 +3,7 @@ doc_id: XC-HR-003
 title: 薪酬管理制度
 department: 人力资源部
 access_scope: 管理层、人力资源部
+access_group: hr
 classification: 秘密
 owner: 人力资源部
 updated_at: "2026-01-10"

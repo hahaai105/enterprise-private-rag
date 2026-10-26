@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -11,11 +12,12 @@ import yaml
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from .config import Settings
+from .permissions import KNOWN_DEPARTMENTS, PUBLIC, allowed_access_groups
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 FRONT_MATTER_RE = re.compile(r"\A---\s*\r?\n(.*?)\r?\n---\s*\r?\n?(.*)\Z", re.S)
-REQUIRED_METADATA = ("doc_id", "title", "department", "access_scope")
+REQUIRED_METADATA = ("doc_id", "title", "department", "access_scope", "access_group")
 SNIPPET_LENGTH = 120
 
 
@@ -38,12 +40,16 @@ class BgeEmbedder:
         self.model_name = model_name
         self.device = device
         self._model: Any = None
+        self._load_lock = threading.Lock()
 
     def _load(self) -> Any:
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
+            # 飞书机器人使用线程池并发处理消息，避免重复加载模型
+            with self._load_lock:
+                if self._model is None:
+                    from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self.model_name, device=self.device)
+                    self._model = SentenceTransformer(self.model_name, device=self.device)
         return self._model
 
     def encode_documents(self, texts: list[str]) -> list[list[float]]:
@@ -69,6 +75,7 @@ class KnowledgeDocument:
     title: str
     department: str
     access_scope: str
+    access_group: str
     classification: str
     owner: str
     updated_at: str
@@ -116,12 +123,18 @@ def load_documents(kb_dir: Path) -> list[KnowledgeDocument]:
         if missing:
             raise ValueError(f"{path.name} 缺少元数据字段：{', '.join(missing)}")
 
+        access_group = str(metadata["access_group"]).strip().lower()
+        if access_group not in KNOWN_DEPARTMENTS:
+            allowed = "、".join(sorted(KNOWN_DEPARTMENTS))
+            raise ValueError(f"{path.name} 的 access_group 非法：{access_group}，可选值：{allowed}")
+
         documents.append(
             KnowledgeDocument(
                 doc_id=str(metadata["doc_id"]),
                 title=str(metadata["title"]),
                 department=str(metadata["department"]),
                 access_scope=str(metadata["access_scope"]),
+                access_group=access_group,
                 classification=str(metadata.get("classification", "内部")),
                 owner=str(metadata.get("owner", metadata["department"])),
                 updated_at=str(metadata.get("updated_at", "")),
@@ -166,6 +179,7 @@ def split_documents(
                         "source": document.source,
                         "department": document.department,
                         "access_scope": document.access_scope,
+                        "access_group": document.access_group,
                         "classification": document.classification,
                         "chunk_index": index,
                     },
@@ -225,6 +239,7 @@ class KnowledgeBase:
         )
         self._client: Any = None
         self._collection: Any = None
+        self._init_lock = threading.RLock()
 
     @property
     def knowledge_base_dir(self) -> Path:
@@ -236,23 +251,34 @@ class KnowledgeBase:
 
     def _get_client(self) -> Any:
         if self._client is None:
-            import chromadb
-            from chromadb.config import Settings as ChromaSettings
+            with self._init_lock:
+                if self._client is None:
+                    import chromadb
+                    from chromadb.config import Settings as ChromaSettings
 
-            self.chroma_dir.mkdir(parents=True, exist_ok=True)
-            self._client = chromadb.PersistentClient(
-                path=str(self.chroma_dir),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
+                    self.chroma_dir.mkdir(parents=True, exist_ok=True)
+                    self._client = chromadb.PersistentClient(
+                        path=str(self.chroma_dir),
+                        settings=ChromaSettings(anonymized_telemetry=False),
+                    )
         return self._client
 
     def _get_collection(self) -> Any:
         if self._collection is None:
-            self._collection = self._get_client().get_or_create_collection(
-                name=self.settings.chroma_collection,
-                metadata={"hnsw:space": "cosine"},
-            )
+            with self._init_lock:
+                if self._collection is None:
+                    self._collection = self._get_client().get_or_create_collection(
+                        name=self.settings.chroma_collection,
+                        metadata={"hnsw:space": "cosine"},
+                    )
         return self._collection
+
+    def is_ready(self) -> bool:
+        """向量库中是否已有切片；只访问 Chroma，不加载 Embedding 模型。"""
+        try:
+            return int(self._get_collection().count()) > 0
+        except Exception:
+            return False
 
     def ingest(self, rebuild: bool = False) -> int:
         """加载、切分并向量化知识库，返回写入的切片数。"""
@@ -286,8 +312,8 @@ class KnowledgeBase:
             )
         return len(chunks)
 
-    def search(self, question: str) -> list[RetrievedChunk]:
-        """按问题检索相关片段，低于阈值的片段会被丢弃。"""
+    def search(self, question: str, department: str = PUBLIC) -> list[RetrievedChunk]:
+        """按问题检索相关片段，只返回 public 与本部门文档，并丢弃低分片段。"""
         collection = self._get_collection()
         if collection.count() == 0:
             raise KnowledgeBaseNotReadyError(
@@ -298,6 +324,7 @@ class KnowledgeBase:
         result = collection.query(
             query_embeddings=[query_embedding],
             n_results=self.settings.rag_top_k,
+            where={"access_group": {"$in": allowed_access_groups(department)}},
             include=["documents", "metadatas", "distances"],
         )
 

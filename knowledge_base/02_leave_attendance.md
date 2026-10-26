@@ -3,6 +3,7 @@ doc_id: XC-HR-002
 title: 请假与考勤制度
 department: 人力资源部
 access_scope: 全体员工
+access_group: public
 classification: 内部
 owner: 人力资源部
 updated_at: "2026-09-30"

@@ -3,6 +3,7 @@ doc_id: XC-RD-001
 title: 技术开发规范
 department: 研发中心
 access_scope: 研发中心
+access_group: rd
 classification: 内部
 owner: 研发中心
 updated_at: "2026-09-20"

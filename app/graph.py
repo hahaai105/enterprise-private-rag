@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
+from .permissions import PUBLIC
 from .rag import RetrievedChunk, format_context, sources_from_chunks
 
 SYSTEM_PROMPT = (
@@ -22,6 +23,7 @@ NO_CONTEXT_ANSWER = "知识库中未找到相关依据，暂时无法回答这�
 
 class ChatState(TypedDict):
     question: str
+    department: str
     context: str
     sources: list[dict[str, Any]]
     answer: str
@@ -34,6 +36,7 @@ def build_graph(model: Any, retriever: Any):
         chunks: list[RetrievedChunk] = await asyncio.to_thread(
             retriever.search,
             state["question"],
+            state.get("department", PUBLIC),
         )
         return {
             "context": format_context(chunks),
@@ -67,9 +70,19 @@ def build_graph(model: Any, retriever: Any):
     return builder.compile()
 
 
-async def run_chat(graph, question: str) -> tuple[str, list[dict[str, Any]]]:
-    """执行工作流并返回答案及文档来源。"""
+async def run_chat(
+    graph,
+    question: str,
+    department: str = PUBLIC,
+) -> tuple[str, list[dict[str, Any]]]:
+    """执行工作流并返回答案及文档来源；department 决定检索可见范围。"""
     result = await graph.ainvoke(
-        {"question": question, "context": "", "sources": [], "answer": ""}
+        {
+            "question": question,
+            "department": department,
+            "context": "",
+            "sources": [],
+            "answer": "",
+        }
     )
     return str(result["answer"]), list(result.get("sources", []))

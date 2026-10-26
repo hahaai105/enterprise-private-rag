@@ -25,14 +25,16 @@ class FakeChatModel:
 
 
 class FakeRetriever:
-    """模拟向量检索器，记录收到的问题。"""
+    """模拟向量检索器，记录收到的问题与部门。"""
 
     def __init__(self, chunks: list[RetrievedChunk] | None = None):
         self.chunks = chunks if chunks is not None else []
         self.questions: list[str] = []
+        self.departments: list[str] = []
 
-    def search(self, question: str) -> list[RetrievedChunk]:
+    def search(self, question: str, department: str = "public") -> list[RetrievedChunk]:
         self.questions.append(question)
+        self.departments.append(department)
         return list(self.chunks)
 
 
@@ -43,6 +45,7 @@ def make_chunk(
     source: str = "02_leave_attendance.md",
     department: str = "人力资源部",
     access_scope: str = "全体员工",
+    access_group: str = "public",
     score: float = 0.82,
 ) -> RetrievedChunk:
     return RetrievedChunk(
@@ -53,6 +56,7 @@ def make_chunk(
             "source": source,
             "department": department,
             "access_scope": access_scope,
+            "access_group": access_group,
             "classification": "内部",
             "chunk_index": 0,
         },

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.config import Settings
 from app.rag import (
     KnowledgeBase,
@@ -29,10 +31,18 @@ def test_knowledge_base_has_six_documents_with_metadata():
     assert len(documents) == 6
     assert len({document.doc_id for document in documents}) == 6
 
+    assert {document.access_group for document in documents} == {
+        "public",
+        "finance",
+        "hr",
+        "rd",
+    }
+
     for document in documents:
         assert document.title
         assert document.department
         assert document.access_scope
+        assert document.access_group in {"public", "finance", "hr", "rd"}
         assert document.source.endswith(".md")
         assert document.body
 
@@ -81,6 +91,7 @@ def test_knowledge_base_ingest_and_search_with_fake_embedder(tmp_path):
         "title: 请假与考勤制度\n"
         "department: 人力资源部\n"
         "access_scope: 全体员工\n"
+        "access_group: public\n"
         "---\n\n"
         "# 年假\n\n员工年假为 7 天。\n",
         encoding="utf-8",
@@ -98,6 +109,7 @@ def test_knowledge_base_ingest_and_search_with_fake_embedder(tmp_path):
         chunk_overlap=20,
     )
     knowledge_base = KnowledgeBase(settings, embedder=FakeEmbedder())
+    assert knowledge_base.is_ready() is False
 
     count = knowledge_base.ingest(rebuild=True)
     assert count >= 1
@@ -106,5 +118,81 @@ def test_knowledge_base_ingest_and_search_with_fake_embedder(tmp_path):
     assert results
     assert results[0].metadata["doc_id"] == "XC-HR-002"
     assert results[0].score >= 0.99
+    assert knowledge_base.is_ready() is True
 
     assert knowledge_base.search("食堂菜单") == []
+
+
+class SameVectorEmbedder:
+    """所有文本返回相同向量，确保检索排名不干扰权限过滤验证。"""
+
+    def encode_documents(self, texts):
+        return [[1.0, 0.0] for _ in texts]
+
+    def encode_query(self, text):
+        return [1.0, 0.0]
+
+
+def test_search_only_returns_public_and_own_department(tmp_path):
+    docs_dir = tmp_path / "kb"
+    docs_dir.mkdir()
+    for filename, doc_id, title, access_group in (
+        ("public.md", "XC-PUB-001", "公共制度", "public"),
+        ("finance.md", "XC-FIN-001", "财务预算", "finance"),
+        ("hr.md", "XC-HR-003", "薪酬制度", "hr"),
+    ):
+        (docs_dir / filename).write_text(
+            "---\n"
+            f"doc_id: {doc_id}\n"
+            f"title: {title}\n"
+            "department: 测试部\n"
+            "access_scope: 测试\n"
+            f"access_group: {access_group}\n"
+            "---\n\n"
+            f"# {title}\n\n"
+            f"{title}内容。\n",
+            encoding="utf-8",
+        )
+
+    settings = Settings(
+        deepseek_api_key="",
+        _env_file=None,
+        knowledge_base_dir=str(docs_dir),
+        chroma_dir=str(tmp_path / "chroma"),
+        chroma_collection="test_access_control",
+        rag_top_k=10,
+        rag_score_threshold=0.4,
+        chunk_size=200,
+        chunk_overlap=20,
+    )
+    knowledge_base = KnowledgeBase(settings, embedder=SameVectorEmbedder())
+    knowledge_base.ingest(rebuild=True)
+
+    def doc_ids(department):
+        return {
+            chunk.metadata["doc_id"]
+            for chunk in knowledge_base.search("任意问题", department)
+        }
+
+    assert doc_ids("finance") == {"XC-PUB-001", "XC-FIN-001"}
+    assert doc_ids("hr") == {"XC-PUB-001", "XC-HR-003"}
+    assert doc_ids("unknown") == {"XC-PUB-001"}
+
+
+def test_load_documents_rejects_unknown_access_group(tmp_path):
+    docs_dir = tmp_path / "kb"
+    docs_dir.mkdir()
+    (docs_dir / "bad.md").write_text(
+        "---\n"
+        "doc_id: XC-X-001\n"
+        "title: 测试文档\n"
+        "department: 测试部\n"
+        "access_scope: 测试\n"
+        "access_group: admin\n"
+        "---\n\n"
+        "# 测试文档\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="access_group"):
+        load_documents(docs_dir)
